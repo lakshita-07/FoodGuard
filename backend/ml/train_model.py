@@ -4,8 +4,33 @@ from sklearn.preprocessing import LabelEncoder
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score
 import joblib
+from pathlib import Path
 
-df = pd.read_csv("food_data.csv")
+BASE_DIR = Path(__file__).resolve().parent
+df = pd.read_csv(BASE_DIR / "intelligent_packaging_iot_sensor_data.csv")
+
+df = df[[
+    "Food_Category",
+    "Temperature_C",
+    "Humidity_Percent",
+    "Package_Age_Hours",
+    "Packaging_Material",
+    "Food_Safety_Risk_Level",
+]].dropna()
+df = df.rename(columns={
+    "Food_Category": "food_type",
+    "Temperature_C": "temperature",
+    "Humidity_Percent": "humidity",
+    "Package_Age_Hours": "days_stored",
+    "Packaging_Material": "packaging",
+    "Food_Safety_Risk_Level": "risk",
+})
+df["days_stored"] = df["days_stored"] / 24
+
+# Use ready-meal storage records as a temporary profile for Indian food.
+indian_food = df[df["food_type"] == "Ready Meal"].copy()
+indian_food["food_type"] = "Indian Food"
+df = pd.concat([df, indian_food], ignore_index=True)
 
 food_encoder = LabelEncoder()
 packaging_encoder = LabelEncoder()
@@ -36,9 +61,9 @@ accuracy = accuracy_score(y_test, predictions)
 print("Model trained successfully!")
 print("Accuracy:", accuracy)
 
-joblib.dump(model, "food_model.pkl")
-joblib.dump(food_encoder, "food_encoder.pkl")
-joblib.dump(packaging_encoder, "packaging_encoder.pkl")
-joblib.dump(risk_encoder, "risk_encoder.pkl")
+joblib.dump(model, BASE_DIR.parent / "food_model.pkl")
+joblib.dump(food_encoder, BASE_DIR.parent / "food_encoder.pkl")
+joblib.dump(packaging_encoder, BASE_DIR.parent / "packaging_encoder.pkl")
+joblib.dump(risk_encoder, BASE_DIR.parent / "risk_encoder.pkl")
 
 print("Model saved successfully!")

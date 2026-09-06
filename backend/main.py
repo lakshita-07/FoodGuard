@@ -1,14 +1,15 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import pandas as pd
 import joblib
 from dotenv import load_dotenv
 from groq import Groq
-from supabase import create_client
 import os
+from pathlib import Path
 
-load_dotenv()
+BASE_DIR = Path(__file__).resolve().parent
+load_dotenv(BASE_DIR / ".env")
 
 app = FastAPI()
 app.add_middleware(
@@ -19,22 +20,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-model = joblib.load("food_model.pkl")
-food_encoder = joblib.load("food_encoder.pkl")
-packaging_encoder = joblib.load("packaging_encoder.pkl")
-risk_encoder = joblib.load("risk_encoder.pkl")
+model = joblib.load(BASE_DIR / "food_model.pkl")
+food_encoder = joblib.load(BASE_DIR / "food_encoder.pkl")
+packaging_encoder = joblib.load(BASE_DIR / "packaging_encoder.pkl")
+risk_encoder = joblib.load(BASE_DIR / "risk_encoder.pkl")
 
 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
-supabase = create_client(
-    os.getenv("SUPABASE_URL"),
-    os.getenv("SUPABASE_KEY")
-)
 
 class FoodInput(BaseModel):
     food: str
     temperature: float
     humidity: float
-    days_stored: int
+    days_stored: float
     packaging: str
 
 
@@ -46,8 +43,26 @@ def home():
 @app.post("/predict")
 def predict(data: FoodInput):
 
-    food_encoded = food_encoder.transform([data.food])[0]
-    packaging_encoded = packaging_encoder.transform([data.packaging])[0]
+    food_values = {value.casefold(): value for value in food_encoder.classes_}
+    packaging_values = {value.casefold(): value for value in packaging_encoder.classes_}
+    food = food_values.get(data.food.strip().casefold())
+    packaging = packaging_values.get(data.packaging.strip().casefold())
+
+    if food is None:
+        supported_foods = ", ".join(food_encoder.classes_)
+        raise HTTPException(
+            status_code=400,
+            detail=f"Food not supported. Choose: {supported_foods}."
+        )
+
+    if packaging is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Packaging not supported. Choose: {', '.join(packaging_encoder.classes_)}."
+        )
+
+    food_encoded = food_encoder.transform([food])[0]
+    packaging_encoded = packaging_encoder.transform([packaging])[0]
 
     input_data = pd.DataFrame([[
         food_encoded,
@@ -70,11 +85,11 @@ def predict(data: FoodInput):
     prompt = f"""
 You are a food storage assistant.
 
-Food: {data.food}
+Food: {food}
 Temperature: {data.temperature}°C
 Humidity: {data.humidity}%
 Days stored: {data.days_stored}
-Packaging: {data.packaging}
+Packaging: {packaging}
 ML predicted risk: {risk}
 
 Explain briefly why the risk may be {risk} and give one practical
@@ -96,28 +111,9 @@ Do not claim that this prediction guarantees that food is safe or unsafe.
 
     explanation = response.choices[0].message.content
 
-    supabase.table("predictions").insert({
-        "food_type": data.food,
-        "temperature": data.temperature,
-        "humidity": data.humidity,
-        "days_stored": data.days_stored,
-        "packaging": data.packaging,
-        "risk": risk,
-        "explanation": explanation
-    }).execute()
-
     return {
-        "food": data.food,
+        "food": food,
         "risk": risk,
         "explanation": explanation
     }
-@app.get("/history")
-def get_history():
-
-    response = supabase.table("predictions") \
-        .select("*") \
-        .order("created_at", desc=True) \
-        .execute()
-
-    return response.data
 
