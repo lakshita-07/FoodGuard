@@ -21,7 +21,7 @@ function App() {
       });
       const data = await response.json();
       setResult(response.ok ? data : { error: data.detail || "The backend rejected this request." });
-    } catch (error) {
+    } catch {
       setResult({ error: "Could not connect to the backend." });
     }
     setLoading(false);
